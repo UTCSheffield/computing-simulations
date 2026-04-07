@@ -1,0 +1,5 @@
+simpy>=4.1.1
+vidigi>=1.3.0
+streamlit>=1.56.0
+plotly>=5.0.0
+pandas>=2.0.0
