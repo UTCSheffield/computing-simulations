@@ -2,13 +2,13 @@
 
 Models a request travelling:
   Client (Application → Physical)
-  → Network Node 1 (Physical → Network)
-  → Network Node 2 (Physical → Network)
+  → Network Node 1 (Physical → Network → Physical )
+  → Network Node 2 (Physical → Network → Physical )
   → Server (Physical → Application)
   → Server processes and sends response
   → Server (Application → Physical)
-  → Network Node 2 (Network → Physical)
-  → Network Node 1 (Network → Physical)
+  → Network Node 2 (Physical → Network → Physical)
+  → Network Node 1 (Physical → Network → Physical)
   → Client (Physical → Application)
 """
 
@@ -92,7 +92,7 @@ def _web_request_process(env, request_id, logger, params):
 
     def _do_stage(stage, base_time):
         logger.log_queue(entity_id=request_id, event=stage, time=env.now)
-        duration = max(0.05, base_time + random.uniform(-jitter, jitter))
+        duration = max(1, base_time + random.randint(-jitter, jitter))
         return env.timeout(duration)
 
     logger.log_arrival(entity_id=request_id, time=env.now)
@@ -115,7 +115,7 @@ def _web_request_process(env, request_id, logger, params):
 
     # Server processes the request
     yield env.timeout(
-        max(0.1, params["server_processing_time"] + random.uniform(0, jitter * 2))
+        max(1, params["server_processing_time"] + random.randint(0, jitter * 2))
     )
 
     # --- RESPONSE: Server OSI stack (Application → Physical) ---
@@ -141,40 +141,40 @@ def _request_generator(env, logger, params):
     """Generate web requests at exponentially-distributed intervals."""
     request_id = 0
     while True:
-        inter = max(0.1, random.expovariate(1.0 / params["inter_arrival_time"]))
+        inter = max(1, round(random.expovariate(1.0 / params["inter_arrival_time"])))
         yield env.timeout(inter)
         request_id += 1
         env.process(_web_request_process(env, request_id, logger, params))
 
 
 def run_simulation(
-    sim_duration: float = 300.0,
-    inter_arrival_time: float = 18.0,
-    client_layer_time: float = 1.2,
-    node_layer_time: float = 0.6,
-    server_layer_time: float = 1.2,
-    server_processing_time: float = 5.0,
-    jitter: float = 0.3,
+    sim_duration: int = 300,
+    inter_arrival_time: int = 18,
+    client_layer_time: int = 1,
+    node_layer_time: int = 1,
+    server_layer_time: int = 1,
+    server_processing_time: int = 5,
+    jitter: int = 1,
     random_seed: int = 42,
 ):
     """Run the HTTP web-request OSI simulation.
 
     Parameters
     ----------
-    sim_duration : float
-        Total simulation time (arbitrary time units).
-    inter_arrival_time : float
-        Mean gap between successive web-request arrivals (same units).
-    client_layer_time : float
-        Mean time a packet spends at each client-side OSI layer.
-    node_layer_time : float
-        Mean time a packet spends at each network-node OSI layer.
-    server_layer_time : float
-        Mean time a packet spends at each server-side OSI layer.
-    server_processing_time : float
-        Mean time the server spends generating a response.
-    jitter : float
-        Half-width of the uniform random perturbation added to each delay.
+    sim_duration : int
+        Total simulation time in milliseconds.
+    inter_arrival_time : int
+        Mean gap between successive web-request arrivals (milliseconds).
+    client_layer_time : int
+        Mean time a packet spends at each client-side OSI layer (milliseconds).
+    node_layer_time : int
+        Mean time a packet spends at each network-node OSI layer (milliseconds).
+    server_layer_time : int
+        Mean time a packet spends at each server-side OSI layer (milliseconds).
+    server_processing_time : int
+        Mean time the server spends generating a response (milliseconds).
+    jitter : int
+        Integer half-width random perturbation in milliseconds.
     random_seed : int
         Seed for the random-number generator (for reproducibility).
 
@@ -185,6 +185,15 @@ def run_simulation(
         ``event``.
     """
     random.seed(random_seed)
+
+    # Normalize timing inputs to integer milliseconds.
+    sim_duration = max(1, int(round(sim_duration)))
+    inter_arrival_time = max(1, int(round(inter_arrival_time)))
+    client_layer_time = max(1, int(round(client_layer_time)))
+    node_layer_time = max(1, int(round(node_layer_time)))
+    server_layer_time = max(1, int(round(server_layer_time)))
+    server_processing_time = max(1, int(round(server_processing_time)))
+    jitter = max(0, int(round(jitter)))
 
     env = simpy.Environment()
     logger = EventLogger(env=env)

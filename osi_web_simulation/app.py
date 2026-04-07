@@ -38,7 +38,10 @@ st.markdown(
     traversing two **network routers**, arriving at a **web server**, and the
     HTTP response travelling back the same path.
 
-    Each 🌐 icon represents one web request/response cycle.
+    Each 🌐 icon represents one web request.
+    Each 📄 icon represents one web html response packet.
+    Each 📦 icon represents one web image response packet.
+
     Use the sidebar to adjust simulation parameters, then press **Run Simulation**.
     """
 )
@@ -50,56 +53,52 @@ with st.sidebar:
     st.header("⚙️ Simulation Parameters")
 
     sim_duration = st.slider(
-        "Simulation duration (time units)",
+        "Simulation duration (ms)",
         min_value=50, max_value=600, value=250, step=25,
         help="Total length of the simulation run.",
     )
     inter_arrival_time = st.slider(
-        "Mean time between requests (time units)",
+        "Mean time between requests (ms)",
         min_value=5, max_value=60, value=12, step=1,
         help="Average gap between successive web requests arriving.",
     )
     client_layer_time = st.slider(
-        "Client layer processing time",
-        min_value=0.2, max_value=4.0, value=1.2, step=0.1,
+        "Client layer processing time (ms)",
+        min_value=1, max_value=10, value=1, step=1,
         help="Mean time a packet spends at each client-side OSI layer.",
     )
     node_layer_time = st.slider(
-        "Router layer processing time",
-        min_value=0.1, max_value=2.0, value=0.6, step=0.1,
+        "Router layer processing time (ms)",
+        min_value=1, max_value=10, value=1, step=1,
         help="Mean time a packet spends at each network-router OSI layer.",
     )
     server_layer_time = st.slider(
-        "Server layer processing time",
-        min_value=0.2, max_value=4.0, value=1.2, step=0.1,
+        "Server layer processing time (ms)",
+        min_value=1, max_value=10, value=1, step=1,
         help="Mean time a packet spends at each server-side OSI layer.",
     )
     server_processing_time = st.slider(
-        "Server processing time",
-        min_value=1.0, max_value=30.0, value=5.0, step=0.5,
+        "Server processing time (ms)",
+        min_value=1, max_value=100, value=5, step=1,
         help="Mean time the server takes to generate the HTTP response.",
     )
     jitter = st.slider(
-        "Jitter (±random variation)",
-        min_value=0.0, max_value=1.0, value=0.3, step=0.05,
+        "Jitter (±integer ms variation)",
+        min_value=0, max_value=5, value=1, step=1,
         help="Half-width of random delay variation at each stage.",
     )
     random_seed = st.number_input(
         "Random seed", min_value=0, max_value=9999, value=42, step=1,
         help="Seed for reproducibility.",
     )
-    every_x_units = st.slider(
-        "Animation snapshot interval",
-        min_value=1, max_value=10, value=2, step=1,
-        help=(
-            "Time units between animation frames. "
-            "Smaller values give smoother animation but take longer to render."
-        ),
-    )
-    frame_duration = st.slider(
-        "Frame duration (ms)",
-        min_value=100, max_value=1000, value=300, step=50,
-        help="How long each animation frame is displayed.",
+    playback_mode = st.selectbox(
+        "Playback speed",
+        options=[
+            "Default: 1 ms simulation = 1 second playback",
+            "Fast: fit full animation into 10 seconds",
+        ],
+        index=0,
+        help="Both modes keep every simulation step visible (1 ms snapshots).",
     )
     run_btn = st.button("▶ Run Simulation", type="primary", use_container_width=True)
 
@@ -133,16 +132,29 @@ if run_btn:
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Total requests generated", num_requests)
-    col2.metric("Simulation duration", f"{sim_duration} units")
+    col2.metric("Simulation duration", f"{sim_duration} ms")
     col3.metric("Events logged", len(event_log))
 
     event_position_df = get_event_positions()
+
+    # Always capture every simulation step (1 ms snapshots).
+    every_x_units = 1
+
+    # Playback timing:
+    # - Default mode: 1 simulated ms is displayed for 1 second.
+    # - Fast mode: compress all frames into ~10 seconds total.
+    max_sim_time = int(event_log["time"].max()) if not event_log.empty else 0
+    frame_count = max(1, (max_sim_time // every_x_units) + 1)
+    if playback_mode == "Fast: fit full animation into 10 seconds":
+        frame_duration = max(1, int(round(10000 / frame_count)))
+    else:
+        frame_duration = 1000
 
     with st.spinner("Building animation…"):
         fig = animate_activity_log(
             event_log=event_log,
             event_position_df=event_position_df,
-            simulation_time_unit="seconds",
+            simulation_time_unit="milliseconds",
             every_x_time_units=every_x_units,
             plotly_height=820,
             plotly_width=1300,
@@ -157,7 +169,7 @@ if run_btn:
             override_y_max=820,
             wrap_queues_at=5,
             step_snapshot_max=30,
-            custom_entity_icon_list=["🌐"],
+            custom_entity_icon_list=["🌐", "📄", "📦"],
         )
 
     fig = add_layout_decorations(fig, event_position_df)
