@@ -60,7 +60,7 @@ with st.sidebar:
     )
     inter_arrival_time = st.slider(
         "Mean time between requests (ms)",
-        min_value=5, max_value=60, value=12, step=1,
+        min_value=5, max_value=60, value=8, step=1,
         help="Average gap between successive web requests arriving.",
     )
     client_layer_time = st.slider(
@@ -95,11 +95,13 @@ with st.sidebar:
     playback_mode = st.selectbox(
         "Playback speed",
         options=[
-            "Default: 1 ms simulation = 1 second playback",
-            "Fast: fit full animation into 10 seconds",
+            "1000 ms per frame (slow)",
+            "500 ms per frame (default)",
+            "250 ms per frame (fast)",
+            "100 ms per frame (very fast)",
         ],
-        index=0,
-        help="Both modes keep every simulation step visible (1 ms snapshots).",
+        index=1,
+        help="Fixed frame duration for the animation. All options keep 1 ms snapshots.",
     )
     run_btn = st.button("▶ Run Simulation", type="primary", use_container_width=True)
 
@@ -141,16 +143,15 @@ if run_btn:
     # Always capture every simulation step (1 ms snapshots).
     every_x_units = 1
 
-    # Playback timing:
-    # - Default mode: 1 simulated ms is displayed for 1 second.
-    # - Fast mode: compress all frames into ~10 seconds total.
-    max_sim_time = int(event_log["time"].max()) if not event_log.empty else 0
-    frame_count = max(1, (max_sim_time // every_x_units) + 1)
-    if playback_mode == "Fast: fit full animation into 10 seconds":
-        frame_duration = max(1, int(round(10000 / frame_count)))
-    else:
-        frame_duration = 1000
-
+    # Playback timing uses explicit fixed frame-duration presets.
+    frame_duration_map = {
+        "1000 ms per frame (slow)": 1000,
+        "500 ms per frame (default)": 500,
+        "250 ms per frame (fast)": 250,
+        "100 ms per frame (very fast)": 100,
+    }
+    frame_duration = frame_duration_map[playback_mode]
+    
     with st.spinner("Building animation…"):
         fig = animate_activity_log(
             event_log=event_log,

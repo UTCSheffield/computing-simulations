@@ -74,6 +74,9 @@ def get_event_positions() -> pd.DataFrame:
     def _add(event, x, y, label):
         rows.append({"event": event, "x": x, "y": y, "label": label})
 
+    # Place lifecycle arrival marker directly at the client application layer.
+    _add("arrival", X_CLIENT_REQ, LAYER_Y["application"], "")
+
     # ------------------------------------------------------------------
     # CLIENT — request going DOWN (Application first, Physical last)
     # ------------------------------------------------------------------
@@ -231,6 +234,24 @@ def add_layout_decorations(fig, event_position_df: pd.DataFrame):
     # ---- Device boxes ----
     _box(X_CLIENT_REQ, X_CLIENT_RESP, LAYER_Y["physical"], LAYER_Y["application"],
          "#1f77b4", "CLIENT")
+    
+    # ---- User icon above client application ----
+    fig.add_annotation(
+        x=(X_CLIENT_REQ + X_CLIENT_RESP) / 2,
+        y=LAYER_Y["application"] + 85,
+        text="👤",
+        showarrow=False,
+        font=dict(size=28),
+    )
+    fig.add_annotation(
+        x=(X_CLIENT_REQ + X_CLIENT_RESP) / 2,
+        y=LAYER_Y["application"] + 55,
+        text="<b>User</b>",
+        showarrow=False,
+        font=dict(size=12, color="#1f77b4"),
+        xanchor="center",
+    )
+
     _box(X_NODE1_RESP_OUT, X_NODE1_REQ_OUT, LAYER_Y["physical"], LAYER_Y["network"],
          "#ff7f0e", "ROUTER 1")
     _box(X_NODE2_RESP_OUT, X_NODE2_REQ_OUT, LAYER_Y["physical"], LAYER_Y["network"],

@@ -107,11 +107,13 @@ def _web_request_process(env, request_id, logger, params):
         duration = max(1, base_time + random.randint(-jitter, jitter))
         return env.timeout(duration)
 
+    # Keep lifecycle events so vidigi can build entity timelines.
     logger.log_arrival(entity_id=request_id, time=env.now)
 
     # --- REQUEST: Client OSI stack (Application → Physical) ---
     for stage in CLIENT_REQUEST_STAGES:
         yield _do_stage(stage, params["client_layer_time"])
+
 
     # --- REQUEST: Network Node 1 (Physical → Network → Physical) ---
     for stage in NODE1_REQUEST_STAGES:
@@ -151,7 +153,9 @@ def _web_request_process(env, request_id, logger, params):
 
 def _request_generator(env, logger, params):
     """Generate web requests at exponentially-distributed intervals."""
-    request_id = 0
+    request_id = 1
+    env.process(_web_request_process(env, request_id, logger, params))
+
     while True:
         inter = max(1, round(random.expovariate(1.0 / params["inter_arrival_time"])))
         yield env.timeout(inter)
