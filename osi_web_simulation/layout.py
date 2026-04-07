@@ -7,8 +7,9 @@ Coordinate system used by vidigi / Plotly:
 Layout overview (approximate x ranges):
     CLIENT column .............. x =  60 (request ↓)   /  160 (response ↑)
     ROUTER 1 ................... x = 350-410 request   / 300-360 response
-    ROUTER 2 ................... x = 560-620 request   / 510-570 response
-    SERVER column .............. x = 870 (request ↑)   /  950 (response ↓)
+    DNS SERVER ................. x = 490 (query ↑)     /  522 (response ↓)
+    ROUTER 2 ................... x = 645-705 request   / 595-655 response
+    WEB SERVER column .......... x = 975 (request ↑)   / 1055 (response ↓)
 
 OSI layer y-positions (Application at top, Physical at bottom):
   Application (L7) ........... y = 700
@@ -46,13 +47,16 @@ X_NODE1_REQ_OUT = 410   # Router 1 request leaves after going back down
 X_NODE1_RESP_IN = 360   # Router 1 response enters at physical and goes up
 X_NODE1_RESP_OUT = 300  # Router 1 response leaves after going back down
 
-X_NODE2_REQ_IN = 560    # Router 2 request enters at physical and goes up
-X_NODE2_REQ_OUT = 620   # Router 2 request leaves after going back down
-X_NODE2_RESP_IN = 570   # Router 2 response enters at physical and goes up
-X_NODE2_RESP_OUT = 510  # Router 2 response leaves after going back down
+X_DNS_REQ = 490         # DNS server — query arriving (Physical → Application)
+X_DNS_RESP = 522        # DNS server — response leaving (Application → Physical)
 
-X_SERVER_REQ = 870      # Server — request arriving (Physical→Application)
-X_SERVER_RESP = 960     # Server — response leaving (Application→Physical)
+X_NODE2_REQ_IN = 645    # Router 2 request enters at physical and goes up
+X_NODE2_REQ_OUT = 705   # Router 2 request leaves after going back down
+X_NODE2_RESP_IN = 655   # Router 2 response enters at physical and goes up
+X_NODE2_RESP_OUT = 595  # Router 2 response leaves after going back down
+
+X_SERVER_REQ = 975      # Web server — request arriving (Physical→Application)
+X_SERVER_RESP = 1055    # Web server — response leaving (Application→Physical)
 
 
 def get_event_positions() -> pd.DataFrame:
@@ -91,6 +95,36 @@ def get_event_positions() -> pd.DataFrame:
     ]
     for event, y, label in req_client:
         _add(event, X_CLIENT_REQ, y, label)
+
+    # ------------------------------------------------------------------
+    # DNS SERVER — query arriving UP (Physical → Application)
+    # ------------------------------------------------------------------
+    dns_req = [
+        ("dns_physical",      LAYER_Y["physical"],      "Physical"),
+        ("dns_data_link",     LAYER_Y["data_link"],     "Data Link"),
+        ("dns_network",       LAYER_Y["network"],       "Network"),
+        ("dns_transport",     LAYER_Y["transport"],     "Transport"),
+        ("dns_session",       LAYER_Y["session"],       "Session"),
+        ("dns_presentation",  LAYER_Y["presentation"],  "Presentation"),
+        ("dns_application",   LAYER_Y["application"],   "Application"),
+    ]
+    for event, y, label in dns_req:
+        _add(event, X_DNS_REQ, y, label)
+
+    # ------------------------------------------------------------------
+    # DNS SERVER — response leaving DOWN (Application → Physical)
+    # ------------------------------------------------------------------
+    dns_resp = [
+        ("dns_resp_application",  LAYER_Y["application"],  ""),
+        ("dns_resp_presentation", LAYER_Y["presentation"], ""),
+        ("dns_resp_session",      LAYER_Y["session"],      ""),
+        ("dns_resp_transport",    LAYER_Y["transport"],    ""),
+        ("dns_resp_network",      LAYER_Y["network"],      ""),
+        ("dns_resp_data_link",    LAYER_Y["data_link"],    ""),
+        ("dns_resp_physical",     LAYER_Y["physical"],     ""),
+    ]
+    for event, y, label in dns_resp:
+        _add(event, X_DNS_RESP, y, label)
 
     # ------------------------------------------------------------------
     # ROUTER 1 — request direction (Physical → Data Link → Network → Data Link → Physical)
@@ -254,10 +288,12 @@ def add_layout_decorations(fig, event_position_df: pd.DataFrame):
 
     _box(X_NODE1_RESP_OUT, X_NODE1_REQ_OUT, LAYER_Y["physical"], LAYER_Y["network"],
          "#ff7f0e", "ROUTER 1")
+    _box(X_DNS_REQ, X_DNS_RESP, LAYER_Y["physical"], LAYER_Y["application"],
+         "#9467bd", "DNS SERVER")
     _box(X_NODE2_RESP_OUT, X_NODE2_REQ_OUT, LAYER_Y["physical"], LAYER_Y["network"],
          "#ff7f0e", "ROUTER 2")
     _box(X_SERVER_REQ, X_SERVER_RESP, LAYER_Y["physical"], LAYER_Y["application"],
-         "#2ca02c", "SERVER")
+         "#2ca02c", "WEB SERVER")
 
     # ---- OSI layer horizontal bands (light stripes across the full plot) ----
     x_left = event_position_df["x"].min() - 30
@@ -300,74 +336,97 @@ def add_layout_decorations(fig, event_position_df: pd.DataFrame):
             xanchor="right",
             font=dict(size=10, color="#555555"),
         )
-
-    # ---- Static stage labels ----
-    labeled_positions = (
-        event_position_df[event_position_df["label"] != ""]
-        .drop_duplicates(subset=["x", "y", "label"])
-        .sort_values(["x", "y"])
-    )
-    for row in labeled_positions.itertuples(index=False):
-        if row.x <= X_CLIENT_RESP:
-            xshift = 14
-            xanchor = "left"
-        elif row.x >= X_SERVER_REQ:
-            xshift = 14
-            xanchor = "left"
-        else:
-            xshift = 12
-            xanchor = "left"
-
-        fig.add_annotation(
-            x=row.x,
-            y=row.y,
-            text=row.label,
-            showarrow=False,
-            xshift=xshift,
-            xanchor=xanchor,
-            font=dict(size=11, color="#333333"),
-            bgcolor="rgba(255,255,255,0.72)",
-            borderpad=1,
+    if False:
+        # ---- Static stage labels ----
+        labeled_positions = (
+            event_position_df[event_position_df["label"] != ""]
+            .drop_duplicates(subset=["x", "y", "label"])
+            .sort_values(["x", "y"])
         )
+        for row in labeled_positions.itertuples(index=False):
+            if row.x <= X_CLIENT_RESP:
+                xshift = 14
+                xanchor = "left"
+            elif row.x >= X_SERVER_REQ:
+                xshift = 14
+                xanchor = "left"
+            else:
+                xshift = 12
+                xanchor = "left"
+
+            fig.add_annotation(
+                x=row.x,
+                y=row.y,
+                text=row.label,
+                showarrow=False,
+                xshift=xshift,
+                xanchor=xanchor,
+                font=dict(size=11, color="#333333"),
+                bgcolor="rgba(255,255,255,0.72)",
+                borderpad=1,
+            )
 
     # ---- Direction arrows between columns (using data coordinates) ----
-    arrow_y_req = LAYER_Y["physical"] + 16
-    arrow_y_resp = LAYER_Y["physical"] - 16
+    arrow_y_req  = LAYER_Y["physical"] + 16   # HTTP request path
+    arrow_y_resp = LAYER_Y["physical"] - 16   # HTTP response path
+    arrow_y_dns  = LAYER_Y["physical"] + 40   # DNS query / response path
 
-    # Request arrows (→)
+    # HTTP request arrows (→ blue): Client → R1 → R2 → Web Server
     for x_start, x_end in [
-        (X_CLIENT_REQ + pad_x + 5,      X_NODE1_REQ_IN - pad_x - 5),
-        (X_NODE1_REQ_OUT + pad_x + 5,   X_NODE2_REQ_IN - pad_x - 5),
-        (X_NODE2_REQ_OUT + pad_x + 5,   X_SERVER_REQ - pad_x - 5),
+        (X_CLIENT_REQ    + pad_x + 5,  X_NODE1_REQ_IN  - pad_x - 5),
+        (X_NODE1_REQ_OUT + pad_x + 5,  X_NODE2_REQ_IN  - pad_x - 5),
+        (X_NODE2_REQ_OUT + pad_x + 5,  X_SERVER_REQ    - pad_x - 5),
     ]:
         fig.add_annotation(
             x=x_end, y=arrow_y_req,
             ax=x_start, ay=arrow_y_req,
             axref="x", ayref="y",
-            text="",
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1.2,
-            arrowwidth=1.8,
+            text="", showarrow=True,
+            arrowhead=2, arrowsize=1.2, arrowwidth=1.8,
             arrowcolor="#4477bb",
         )
 
-    # Response arrows (←)
+    # HTTP response arrows (← red): Web Server → R2 → R1 → Client
     for x_start, x_end in [
-        (X_SERVER_RESP - pad_x - 5,      X_NODE2_RESP_IN + pad_x + 5),
-        (X_NODE2_RESP_OUT - pad_x - 5,   X_NODE1_RESP_IN + pad_x + 5),
-        (X_NODE1_RESP_OUT - pad_x - 5,   X_CLIENT_RESP + pad_x + 5),
+        (X_SERVER_RESP    - pad_x - 5,  X_NODE2_RESP_IN  + pad_x + 5),
+        (X_NODE2_RESP_OUT - pad_x - 5,  X_NODE1_RESP_IN  + pad_x + 5),
+        (X_NODE1_RESP_OUT - pad_x - 5,  X_CLIENT_RESP    + pad_x + 5),
     ]:
         fig.add_annotation(
             x=x_end, y=arrow_y_resp,
             ax=x_start, ay=arrow_y_resp,
             axref="x", ayref="y",
-            text="",
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1.2,
-            arrowwidth=1.8,
+            text="", showarrow=True,
+            arrowhead=2, arrowsize=1.2, arrowwidth=1.8,
             arrowcolor="#cc4444",
+        )
+
+    # DNS query arrows (→ purple): Client → R1 → DNS Server
+    for x_start, x_end in [
+        (X_CLIENT_REQ    + pad_x + 5,  X_NODE1_REQ_IN  - pad_x - 5),
+        (X_NODE1_REQ_OUT + pad_x + 5,  X_DNS_REQ       - pad_x - 5),
+    ]:
+        fig.add_annotation(
+            x=x_end, y=arrow_y_dns,
+            ax=x_start, ay=arrow_y_dns,
+            axref="x", ayref="y",
+            text="", showarrow=True,
+            arrowhead=2, arrowsize=1.2, arrowwidth=1.8,
+            arrowcolor="#8b5cf6",
+        )
+
+    # DNS response arrows (← purple): DNS Server → R1 → Client
+    for x_start, x_end in [
+        (X_DNS_RESP       + pad_x + 5,  X_NODE1_RESP_IN  + pad_x + 5),
+        (X_NODE1_RESP_OUT - pad_x - 5,  X_CLIENT_RESP    + pad_x + 5),
+    ]:
+        fig.add_annotation(
+            x=x_end, y=arrow_y_dns,
+            ax=x_start, ay=arrow_y_dns,
+            axref="x", ayref="y",
+            text="", showarrow=True,
+            arrowhead=2, arrowsize=1.2, arrowwidth=1.8,
+            arrowcolor="#8b5cf6",
         )
 
     # ---- Legend for arrow colours ----
@@ -377,8 +436,10 @@ def add_layout_decorations(fig, event_position_df: pd.DataFrame):
         x=legend_x,
         y=legend_y,
         text=(
-            '<span style="color:#4477bb;font-weight:bold">── HTTP Request →</span>'
-            '&nbsp;&nbsp;&nbsp;'
+            '<span style="color:#8b5cf6;font-weight:bold">── 📧 DNS Query / Response ──</span>'
+            '&nbsp;&nbsp;&nbsp;&nbsp;'
+            '<span style="color:#4477bb;font-weight:bold">── 🌐 HTTP Request →</span>'
+            '&nbsp;&nbsp;&nbsp;&nbsp;'
             '<span style="color:#cc4444;font-weight:bold">← HTTP Response ──</span>'
         ),
         showarrow=False,

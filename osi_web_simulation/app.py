@@ -33,15 +33,13 @@ st.set_page_config(
 st.title("🌐 HTTP Web-Request — OSI Layer Simulation")
 st.markdown(
     """
-    This simulation models an HTTP request leaving a **client browser**, passing
-    through the seven [OSI layers](https://en.wikipedia.org/wiki/OSI_model),
-    traversing two **network routers**, arriving at a **web server**, and the
-    HTTP response travelling back the same path.
+    This simulation models traffic through the seven
+    [OSI layers](https://en.wikipedia.org/wiki/OSI_model).
+    The model performs **one DNS lookup at startup** to resolve the server hostname,
+    then sends **HTTP requests continuously** using that resolved IP address.
 
-    Each 📧 icon represents one DNS request.
-    Each 🌐 icon represents one web request.
-    Each 📄 icon represents one web html response packet.
-    Each 📦 icon represents one web image response packet.
+    - 📧 **DNS query / response** — Client → Router 1 → DNS Server → Router 1 → Client
+    - 🌐 **HTTP request / response** — Client → Router 1 → Router 2 → Web Server → Router 2 → Router 1 → Client
 
     Use the sidebar to adjust simulation parameters, then press **Run Simulation**.
     """
@@ -59,9 +57,9 @@ with st.sidebar:
         help="Total length of the simulation run.",
     )
     inter_arrival_time = st.slider(
-        "Mean time between requests (ms)",
+        "Fixed time between HTTP requests (ms)",
         min_value=5, max_value=60, value=8, step=1,
-        help="Average gap between successive web requests arriving.",
+        help="Deterministic interval between successive HTTP requests.",
     )
     client_layer_time = st.slider(
         "Client layer processing time (ms)",
@@ -83,14 +81,10 @@ with st.sidebar:
         min_value=1, max_value=100, value=5, step=1,
         help="Mean time the server takes to generate the HTTP response.",
     )
-    jitter = st.slider(
-        "Jitter (±integer ms variation)",
-        min_value=0, max_value=5, value=1, step=1,
-        help="Half-width of random delay variation at each stage.",
-    )
-    random_seed = st.number_input(
-        "Random seed", min_value=0, max_value=9999, value=42, step=1,
-        help="Seed for reproducibility.",
+    dns_processing_time = st.slider(
+        "DNS lookup time (ms)",
+        min_value=1, max_value=20, value=2, step=1,
+        help="Mean time the DNS server takes to resolve the hostname.",
     )
     playback_mode = st.selectbox(
         "Playback speed",
@@ -117,15 +111,16 @@ if run_btn:
             node_layer_time=node_layer_time,
             server_layer_time=server_layer_time,
             server_processing_time=server_processing_time,
-            jitter=jitter,
-            random_seed=int(random_seed),
+            dns_processing_time=dns_processing_time,
         )
 
     if event_log.empty:
         st.warning("No events were generated. Try increasing the simulation duration.")
         st.stop()
 
-    num_requests = event_log["entity_id"].nunique()
+    num_entities = event_log["entity_id"].nunique()
+    num_http_requests = event_log[event_log["entity_id"] != 1]["entity_id"].nunique()
+    num_dns = 1 if (event_log["entity_id"] == 1).any() else 0
     completed = event_log[event_log["event_type"] == "arrival_departure"]
     num_completed = (
         completed[completed["event"] == "depart"]["entity_id"].nunique()
@@ -134,9 +129,14 @@ if run_btn:
     )
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total requests generated", num_requests)
+    col1.metric("Total entities generated", num_entities)
     col2.metric("Simulation duration", f"{sim_duration} ms")
     col3.metric("Events logged", len(event_log))
+
+    st.caption(
+        f"Deterministic rules: DNS lookups={num_dns} (startup only), "
+        f"HTTP requests={num_http_requests}, interval={inter_arrival_time} ms"
+    )
 
     event_position_df = get_event_positions()
 
@@ -166,13 +166,114 @@ if run_btn:
             text_size=12,
             gap_between_entities=10,
             frame_duration=frame_duration,
-            frame_transition_duration=frame_duration,
-            override_x_max=1150,
+            frame_transition_duration=0,
+            override_x_max=1200,
             override_y_max=820,
             wrap_queues_at=5,
             step_snapshot_max=30,
-            custom_entity_icon_list=["🌐", "📄", "📧", "📦"],
+            custom_entity_icon_list=["📧", "🌐"],
         )
+
+    # --- Fix fly-in animation artefact ---
+    # Vidigi uses px.scatter with a single trace per frame and .ids for
+    # animation_group tracking. When an entity_id appears for the first
+    # time, Plotly's JS animates it from (0, 0) to its real position.
+    # Fix: pre-populate every pre-arrival frame with a phantom point at
+    # the entity's first real position but with empty text (invisible),
+    # so Plotly never encounters a "brand new" animation_group mid-run.
+    entity_first: dict = {}  # entity_id -> {x, y, cdata}
+    for frame in fig.frames:
+        t = frame.data[0]
+        if t.ids is None:
+            continue
+        for i, eid in enumerate(t.ids):
+            eid = int(eid)
+            if eid not in entity_first:
+                entity_first[eid] = {
+                    "x": float(t.x[i]),
+                    "y": float(t.y[i]),
+                    "cdata": list(t.customdata[i]) if t.customdata is not None else [],
+                }
+
+    def _add_phantoms(trace):
+        present = set(int(e) for e in trace.ids) if trace.ids is not None else set()
+        absent = set(entity_first.keys()) - present
+        if not absent:
+            return
+        xs = list(trace.x)
+        ys = list(trace.y)
+        texts = list(trace.text) if trace.text is not None else []
+        ids = list(trace.ids) if trace.ids is not None else []
+        cdata = [list(c) for c in trace.customdata] if trace.customdata is not None else []
+        for eid in sorted(absent):
+            ef = entity_first[eid]
+            xs.append(ef["x"])
+            ys.append(ef["y"])
+            texts.append("")
+            ids.append(eid)
+            cdata.append(list(ef["cdata"]))
+        trace.x = tuple(xs)
+        trace.y = tuple(ys)
+        trace.text = tuple(texts)
+        trace.ids = tuple(ids)
+        if cdata:
+            trace.customdata = tuple(tuple(c) for c in cdata)
+
+    _add_phantoms(fig.data[0])
+    for frame in fig.frames:
+        _add_phantoms(frame.data[0])
+
+    # --- Show per-entity state labels beside icons ---
+    # Build a time-ordered label history for each entity.
+    label_history = (
+        event_log[event_log["state_label"].notna() & (event_log["state_label"] != "")]
+        .sort_values(["entity_id", "time"])
+        [["entity_id", "time", "state_label"]]
+    )
+    entity_labels = {}
+    for row in label_history.itertuples(index=False):
+        eid = int(row.entity_id)
+        entity_labels.setdefault(eid, []).append((float(row.time), str(row.state_label)))
+
+    def _label_at_time(entity_id: int, frame_time: float) -> str:
+        history = entity_labels.get(entity_id, [])
+        latest = ""
+        for t, lbl in history:
+            if t <= frame_time:
+                latest = lbl
+            else:
+                break
+        return latest
+
+    def _apply_state_text(trace, frame_time: float):
+        if trace.ids is None or trace.text is None:
+            return
+        label_font_size_px = 11
+        new_text = []
+        for eid_raw, base_text in zip(trace.ids, trace.text):
+            base_text = str(base_text) if base_text is not None else ""
+            if base_text == "":
+                # Keep phantom points invisible.
+                new_text.append("")
+                continue
+            eid = int(eid_raw)
+            state = _label_at_time(eid, frame_time)
+            if state:
+                new_text.append(
+                    f"{base_text} <span style='font-size:{label_font_size_px}px'>{state}</span>"
+                )
+            else:
+                new_text.append(base_text)
+        trace.text = tuple(new_text)
+
+    initial_time = float(fig.frames[0].name) if fig.frames else 0.0
+    _apply_state_text(fig.data[0], initial_time)
+    for frame in fig.frames:
+        try:
+            frame_time = float(frame.name)
+        except (TypeError, ValueError):
+            frame_time = initial_time
+        _apply_state_text(frame.data[0], frame_time)
 
     fig = add_layout_decorations(fig, event_position_df)
 
@@ -187,6 +288,42 @@ if run_btn:
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("🧾 Request / Response Rules and Entity Summary", expanded=True):
+        st.markdown(
+            """
+            **Generation rules (deterministic):**
+            - Exactly one DNS request/response pair is generated at simulation startup.
+            - HTTP requests are generated at a fixed interval (no random arrivals).
+            - All stage and processing times are fixed integer milliseconds (no jitter).
+
+            **Response rules:**
+            - Each DNS request has one DNS response.
+            - Each HTTP request has one HTTP response.
+            """
+        )
+
+        lifecycle = event_log[event_log["event_type"] == "arrival_departure"].copy()
+        arrivals = (
+            lifecycle[lifecycle["event"] == "arrival"][["entity_id", "time"]]
+            .rename(columns={"time": "start_ms"})
+        )
+        departs = (
+            lifecycle[lifecycle["event"] == "depart"][["entity_id", "time"]]
+            .rename(columns={"time": "finish_ms"})
+        )
+        summary_df = arrivals.merge(departs, on="entity_id", how="left")
+        summary_df["type"] = summary_df["entity_id"].apply(
+            lambda eid: "DNS" if int(eid) == 1 else "HTTP"
+        )
+        summary_df["duration_ms"] = summary_df["finish_ms"] - summary_df["start_ms"]
+        summary_df["response_rule"] = summary_df["type"].apply(
+            lambda t: "1 DNS response" if t == "DNS" else "1 HTTP response"
+        )
+        summary_df = summary_df[
+            ["entity_id", "type", "start_ms", "finish_ms", "duration_ms", "response_rule"]
+        ].sort_values("entity_id")
+        st.dataframe(summary_df, use_container_width=True)
 
     with st.expander("📋 Raw event log (first 100 rows)"):
         st.dataframe(event_log.head(100), use_container_width=True)
