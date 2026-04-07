@@ -289,6 +289,15 @@ if run_btn:
 
     st.plotly_chart(fig, use_container_width=True)
 
+    # --- Display file completion and page render milestones ---
+    milestones = event_log[event_log["entity_id"] == 0].copy()
+    if not milestones.empty:
+        st.subheader("📍 Page Load Milestones")
+        st.markdown("These events mark when files finish loading at the client application and when the page is fully rendered:")
+        milestone_display = milestones[["time", "event", "state_label"]].copy()
+        milestone_display.columns = ["Time (ms)", "Event Type", "Status"]
+        st.dataframe(milestone_display, use_container_width=True)
+
     with st.expander("🧾 Request / Response Rules and Entity Summary", expanded=True):
         st.markdown(
             """

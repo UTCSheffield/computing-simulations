@@ -223,6 +223,12 @@ def get_event_positions() -> pd.DataFrame:
     for event, y, label in resp_client:
         _add(event, X_CLIENT_RESP, y, label)
 
+    # ------------------------------------------------------------------
+    # Page load milestone events (shown at Client L7)
+    # ------------------------------------------------------------------
+    _add("file_complete",  X_CLIENT_RESP, LAYER_Y["application"], "")
+    _add("page_rendered",  X_CLIENT_RESP, LAYER_Y["application"], "")
+
     return pd.DataFrame(rows)
 
 
