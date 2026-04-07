@@ -38,6 +38,7 @@ st.markdown(
     traversing two **network routers**, arriving at a **web server**, and the
     HTTP response travelling back the same path.
 
+    Each 📧 icon represents one DNS request.
     Each 🌐 icon represents one web request.
     Each 📄 icon represents one web html response packet.
     Each 📦 icon represents one web image response packet.
@@ -159,7 +160,7 @@ if run_btn:
             plotly_height=820,
             plotly_width=1300,
             include_play_button=True,
-            display_stage_labels=True,
+            display_stage_labels=False,
             entity_icon_size=20,
             text_size=12,
             gap_between_entities=10,
@@ -169,7 +170,7 @@ if run_btn:
             override_y_max=820,
             wrap_queues_at=5,
             step_snapshot_max=30,
-            custom_entity_icon_list=["🌐", "📄", "📦"],
+            custom_entity_icon_list=["🌐", "📄", "📧", "📦"],
         )
 
     fig = add_layout_decorations(fig, event_position_df)

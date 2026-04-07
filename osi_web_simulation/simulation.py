@@ -1,15 +1,19 @@
 """SimPy simulation of HTTP web requests flowing through OSI layers.
 
 Models a request travelling:
-  Client (Application → Physical)
-  → Network Node 1 (Physical → Network → Physical )
-  → Network Node 2 (Physical → Network → Physical )
-  → Server (Physical → Application)
-  → Server processes and sends response
-  → Server (Application → Physical)
-  → Network Node 2 (Physical → Network → Physical)
-  → Network Node 1 (Physical → Network → Physical)
-  → Client (Physical → Application)
+    Client (Application → Physical)
+    → Node 1 Physical
+    → Node 1 (Physical → Data Link → Network → Data Link → Physical)
+    → Node 2 Physical
+    → Node 2 (Physical → Data Link → Network → Data Link → Physical)
+    → Server (Physical → Application)
+    → Server processes and sends response
+    → Server (Application → Physical)
+    → Node 2 Physical
+    → Node 2 (Physical → Data Link → Network → Data Link → Physical)
+    → Node 1 Physical
+    → Node 1 (Physical → Data Link → Network → Data Link → Physical)
+    → Client (Physical → Application)
 """
 
 import random
@@ -32,15 +36,19 @@ CLIENT_REQUEST_STAGES = [
 ]
 
 NODE1_REQUEST_STAGES = [
-    "node1_physical",
-    "node1_data_link",
+    "node1_physical_in",
+    "node1_data_link_up",
     "node1_network",
+    "node1_data_link_down",
+    "node1_physical_out",
 ]
 
 NODE2_REQUEST_STAGES = [
-    "node2_physical",
-    "node2_data_link",
+    "node2_physical_in",
+    "node2_data_link_up",
     "node2_network",
+    "node2_data_link_down",
+    "node2_physical_out",
 ]
 
 SERVER_REQUEST_STAGES = [
@@ -64,15 +72,19 @@ SERVER_RESPONSE_STAGES = [
 ]
 
 NODE2_RESPONSE_STAGES = [
+    "node2_resp_physical_in",
+    "node2_resp_data_link_up",
     "node2_resp_network",
-    "node2_resp_data_link",
-    "node2_resp_physical",
+    "node2_resp_data_link_down",
+    "node2_resp_physical_out",
 ]
 
 NODE1_RESPONSE_STAGES = [
+    "node1_resp_physical_in",
+    "node1_resp_data_link_up",
     "node1_resp_network",
-    "node1_resp_data_link",
-    "node1_resp_physical",
+    "node1_resp_data_link_down",
+    "node1_resp_physical_out",
 ]
 
 CLIENT_RESPONSE_STAGES = [
@@ -101,11 +113,11 @@ def _web_request_process(env, request_id, logger, params):
     for stage in CLIENT_REQUEST_STAGES:
         yield _do_stage(stage, params["client_layer_time"])
 
-    # --- REQUEST: Network Node 1 (Physical → Network) ---
+    # --- REQUEST: Network Node 1 (Physical → Network → Physical) ---
     for stage in NODE1_REQUEST_STAGES:
         yield _do_stage(stage, params["node_layer_time"])
 
-    # --- REQUEST: Network Node 2 (Physical → Network) ---
+    # --- REQUEST: Network Node 2 (Physical → Network → Physical) ---
     for stage in NODE2_REQUEST_STAGES:
         yield _do_stage(stage, params["node_layer_time"])
 
@@ -122,11 +134,11 @@ def _web_request_process(env, request_id, logger, params):
     for stage in SERVER_RESPONSE_STAGES:
         yield _do_stage(stage, params["server_layer_time"])
 
-    # --- RESPONSE: Network Node 2 (Network → Physical) ---
+    # --- RESPONSE: Network Node 2 (Physical → Network → Physical) ---
     for stage in NODE2_RESPONSE_STAGES:
         yield _do_stage(stage, params["node_layer_time"])
 
-    # --- RESPONSE: Network Node 1 (Network → Physical) ---
+    # --- RESPONSE: Network Node 1 (Physical → Network → Physical) ---
     for stage in NODE1_RESPONSE_STAGES:
         yield _do_stage(stage, params["node_layer_time"])
 

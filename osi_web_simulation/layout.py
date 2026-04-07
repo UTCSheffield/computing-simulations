@@ -5,10 +5,10 @@ Coordinate system used by vidigi / Plotly:
   • y increases upward  (y=0 is bottom of the canvas)
 
 Layout overview (approximate x ranges):
-  CLIENT column .............. x =  60 (request ↓)   /  160 (response ↑)
-  ROUTER 1 ................... x = 380 (request →)   /  320 (response ←)
-  ROUTER 2 ................... x = 590 (request →)   /  530 (response ←)
-  SERVER column .............. x = 870 (request ↑)   /  950 (response ↓)
+    CLIENT column .............. x =  60 (request ↓)   /  160 (response ↑)
+    ROUTER 1 ................... x = 350-410 request   / 300-360 response
+    ROUTER 2 ................... x = 560-620 request   / 510-570 response
+    SERVER column .............. x = 870 (request ↑)   /  950 (response ↓)
 
 OSI layer y-positions (Application at top, Physical at bottom):
   Application (L7) ........... y = 700
@@ -41,11 +41,15 @@ LAYER_Y = {
 X_CLIENT_REQ = 60       # Client — request going DOWN  (Application→Physical)
 X_CLIENT_RESP = 160     # Client — response going UP   (Physical→Application)
 
-X_NODE1_REQ = 380       # Router 1 — request direction
-X_NODE1_RESP = 310      # Router 1 — response direction
+X_NODE1_REQ_IN = 350    # Router 1 request enters at physical and goes up
+X_NODE1_REQ_OUT = 410   # Router 1 request leaves after going back down
+X_NODE1_RESP_IN = 360   # Router 1 response enters at physical and goes up
+X_NODE1_RESP_OUT = 300  # Router 1 response leaves after going back down
 
-X_NODE2_REQ = 590       # Router 2 — request direction
-X_NODE2_RESP = 520      # Router 2 — response direction
+X_NODE2_REQ_IN = 560    # Router 2 request enters at physical and goes up
+X_NODE2_REQ_OUT = 620   # Router 2 request leaves after going back down
+X_NODE2_RESP_IN = 570   # Router 2 response enters at physical and goes up
+X_NODE2_RESP_OUT = 510  # Router 2 response leaves after going back down
 
 X_SERVER_REQ = 870      # Server — request arriving (Physical→Application)
 X_SERVER_RESP = 960     # Server — response leaving (Application→Physical)
@@ -74,50 +78,54 @@ def get_event_positions() -> pd.DataFrame:
     # CLIENT — request going DOWN (Application first, Physical last)
     # ------------------------------------------------------------------
     req_client = [
-        ("client_application",  LAYER_Y["application"],  "↓ Application"),
-        ("client_presentation", LAYER_Y["presentation"], "↓ Presentation"),
-        ("client_session",      LAYER_Y["session"],      "↓ Session"),
-        ("client_transport",    LAYER_Y["transport"],    "↓ Transport"),
-        ("client_network",      LAYER_Y["network"],      "↓ Network"),
-        ("client_data_link",    LAYER_Y["data_link"],    "↓ Data Link"),
-        ("client_physical",     LAYER_Y["physical"],     "↓ Physical"),
+        ("client_application",  LAYER_Y["application"],  "Application"),
+        ("client_presentation", LAYER_Y["presentation"], "Presentation"),
+        ("client_session",      LAYER_Y["session"],      "Session"),
+        ("client_transport",    LAYER_Y["transport"],    "Transport"),
+        ("client_network",      LAYER_Y["network"],      "Network"),
+        ("client_data_link",    LAYER_Y["data_link"],    "Data Link"),
+        ("client_physical",     LAYER_Y["physical"],     "Physical"),
     ]
     for event, y, label in req_client:
         _add(event, X_CLIENT_REQ, y, label)
 
     # ------------------------------------------------------------------
-    # ROUTER 1 — request direction (Physical → Data Link → Network)
+    # ROUTER 1 — request direction (Physical → Data Link → Network → Data Link → Physical)
     # ------------------------------------------------------------------
     req_node1 = [
-        ("node1_physical",  LAYER_Y["physical"],  "→ R1 Physical"),
-        ("node1_data_link", LAYER_Y["data_link"], "→ R1 Data Link"),
-        ("node1_network",   LAYER_Y["network"],   "→ R1 Network"),
+        ("node1_physical_in",   X_NODE1_REQ_IN,  LAYER_Y["physical"],  "Physical"),
+        ("node1_data_link_up",  X_NODE1_REQ_IN,  LAYER_Y["data_link"], "Data Link"),
+        ("node1_network",       X_NODE1_REQ_IN,  LAYER_Y["network"],   "Network"),
+        ("node1_data_link_down", X_NODE1_REQ_OUT, LAYER_Y["data_link"], ""),
+        ("node1_physical_out",   X_NODE1_REQ_OUT, LAYER_Y["physical"],  ""),
     ]
-    for event, y, label in req_node1:
-        _add(event, X_NODE1_REQ, y, label)
+    for event, x, y, label in req_node1:
+        _add(event, x, y, label)
 
     # ------------------------------------------------------------------
-    # ROUTER 2 — request direction (Physical → Data Link → Network)
+    # ROUTER 2 — request direction (Physical → Data Link → Network → Data Link → Physical)
     # ------------------------------------------------------------------
     req_node2 = [
-        ("node2_physical",  LAYER_Y["physical"],  "→ R2 Physical"),
-        ("node2_data_link", LAYER_Y["data_link"], "→ R2 Data Link"),
-        ("node2_network",   LAYER_Y["network"],   "→ R2 Network"),
+        ("node2_physical_in",   X_NODE2_REQ_IN,  LAYER_Y["physical"],  "Physical"),
+        ("node2_data_link_up",  X_NODE2_REQ_IN,  LAYER_Y["data_link"], "Data Link"),
+        ("node2_network",       X_NODE2_REQ_IN,  LAYER_Y["network"],   "Network"),
+        ("node2_data_link_down", X_NODE2_REQ_OUT, LAYER_Y["data_link"], ""),
+        ("node2_physical_out",   X_NODE2_REQ_OUT, LAYER_Y["physical"],  ""),
     ]
-    for event, y, label in req_node2:
-        _add(event, X_NODE2_REQ, y, label)
+    for event, x, y, label in req_node2:
+        _add(event, x, y, label)
 
     # ------------------------------------------------------------------
     # SERVER — request arriving UP (Physical first, Application last)
     # ------------------------------------------------------------------
     req_server = [
-        ("server_physical",     LAYER_Y["physical"],     "↑ Physical"),
-        ("server_data_link",    LAYER_Y["data_link"],    "↑ Data Link"),
-        ("server_network",      LAYER_Y["network"],      "↑ Network"),
-        ("server_transport",    LAYER_Y["transport"],    "↑ Transport"),
-        ("server_session",      LAYER_Y["session"],      "↑ Session"),
-        ("server_presentation", LAYER_Y["presentation"], "↑ Presentation"),
-        ("server_application",  LAYER_Y["application"],  "↑ Application"),
+        ("server_physical",     LAYER_Y["physical"],     "Physical"),
+        ("server_data_link",    LAYER_Y["data_link"],    "Data Link"),
+        ("server_network",      LAYER_Y["network"],      "Network"),
+        ("server_transport",    LAYER_Y["transport"],    "Transport"),
+        ("server_session",      LAYER_Y["session"],      "Session"),
+        ("server_presentation", LAYER_Y["presentation"], "Presentation"),
+        ("server_application",  LAYER_Y["application"],  "Application"),
     ]
     for event, y, label in req_server:
         _add(event, X_SERVER_REQ, y, label)
@@ -126,50 +134,54 @@ def get_event_positions() -> pd.DataFrame:
     # SERVER — response leaving DOWN (Application first, Physical last)
     # ------------------------------------------------------------------
     resp_server = [
-        ("server_resp_application",  LAYER_Y["application"],  "↓ Application"),
-        ("server_resp_presentation", LAYER_Y["presentation"], "↓ Presentation"),
-        ("server_resp_session",      LAYER_Y["session"],      "↓ Session"),
-        ("server_resp_transport",    LAYER_Y["transport"],    "↓ Transport"),
-        ("server_resp_network",      LAYER_Y["network"],      "↓ Network"),
-        ("server_resp_data_link",    LAYER_Y["data_link"],    "↓ Data Link"),
-        ("server_resp_physical",     LAYER_Y["physical"],     "↓ Physical"),
+        ("server_resp_application",  LAYER_Y["application"],  ""),
+        ("server_resp_presentation", LAYER_Y["presentation"], ""),
+        ("server_resp_session",      LAYER_Y["session"],      ""),
+        ("server_resp_transport",    LAYER_Y["transport"],    ""),
+        ("server_resp_network",      LAYER_Y["network"],      ""),
+        ("server_resp_data_link",    LAYER_Y["data_link"],    ""),
+        ("server_resp_physical",     LAYER_Y["physical"],     ""),
     ]
     for event, y, label in resp_server:
         _add(event, X_SERVER_RESP, y, label)
 
     # ------------------------------------------------------------------
-    # ROUTER 2 — response direction (Network → Data Link → Physical)
+    # ROUTER 2 — response direction (Physical → Data Link → Network → Data Link → Physical)
     # ------------------------------------------------------------------
     resp_node2 = [
-        ("node2_resp_network",   LAYER_Y["network"],   "← R2 Network"),
-        ("node2_resp_data_link", LAYER_Y["data_link"], "← R2 Data Link"),
-        ("node2_resp_physical",  LAYER_Y["physical"],  "← R2 Physical"),
+        ("node2_resp_physical_in",   X_NODE2_RESP_IN,  LAYER_Y["physical"],  ""),
+        ("node2_resp_data_link_up",  X_NODE2_RESP_IN,  LAYER_Y["data_link"], ""),
+        ("node2_resp_network",       X_NODE2_RESP_IN,  LAYER_Y["network"],   ""),
+        ("node2_resp_data_link_down", X_NODE2_RESP_OUT, LAYER_Y["data_link"], ""),
+        ("node2_resp_physical_out",   X_NODE2_RESP_OUT, LAYER_Y["physical"],  ""),
     ]
-    for event, y, label in resp_node2:
-        _add(event, X_NODE2_RESP, y, label)
+    for event, x, y, label in resp_node2:
+        _add(event, x, y, label)
 
     # ------------------------------------------------------------------
-    # ROUTER 1 — response direction (Network → Data Link → Physical)
+    # ROUTER 1 — response direction (Physical → Data Link → Network → Data Link → Physical)
     # ------------------------------------------------------------------
     resp_node1 = [
-        ("node1_resp_network",   LAYER_Y["network"],   "← R1 Network"),
-        ("node1_resp_data_link", LAYER_Y["data_link"], "← R1 Data Link"),
-        ("node1_resp_physical",  LAYER_Y["physical"],  "← R1 Physical"),
+        ("node1_resp_physical_in",   X_NODE1_RESP_IN,  LAYER_Y["physical"],  ""),
+        ("node1_resp_data_link_up",  X_NODE1_RESP_IN,  LAYER_Y["data_link"], ""),
+        ("node1_resp_network",       X_NODE1_RESP_IN,  LAYER_Y["network"],   ""),
+        ("node1_resp_data_link_down", X_NODE1_RESP_OUT, LAYER_Y["data_link"], ""),
+        ("node1_resp_physical_out",   X_NODE1_RESP_OUT, LAYER_Y["physical"],  ""),
     ]
-    for event, y, label in resp_node1:
-        _add(event, X_NODE1_RESP, y, label)
+    for event, x, y, label in resp_node1:
+        _add(event, x, y, label)
 
     # ------------------------------------------------------------------
     # CLIENT — response arriving UP (Physical first, Application last)
     # ------------------------------------------------------------------
     resp_client = [
-        ("client_resp_physical",     LAYER_Y["physical"],     "↑ Physical"),
-        ("client_resp_data_link",    LAYER_Y["data_link"],    "↑ Data Link"),
-        ("client_resp_network",      LAYER_Y["network"],      "↑ Network"),
-        ("client_resp_transport",    LAYER_Y["transport"],    "↑ Transport"),
-        ("client_resp_session",      LAYER_Y["session"],      "↑ Session"),
-        ("client_resp_presentation", LAYER_Y["presentation"], "↑ Presentation"),
-        ("client_resp_application",  LAYER_Y["application"],  "↑ Application"),
+        ("client_resp_physical",     LAYER_Y["physical"],     ""),
+        ("client_resp_data_link",    LAYER_Y["data_link"],    ""),
+        ("client_resp_network",      LAYER_Y["network"],      ""),
+        ("client_resp_transport",    LAYER_Y["transport"],    ""),
+        ("client_resp_session",      LAYER_Y["session"],      ""),
+        ("client_resp_presentation", LAYER_Y["presentation"], ""),
+        ("client_resp_application",  LAYER_Y["application"],  ""),
     ]
     for event, y, label in resp_client:
         _add(event, X_CLIENT_RESP, y, label)
@@ -203,9 +215,9 @@ def add_layout_decorations(fig, event_position_df: pd.DataFrame):
             type="rect",
             x0=x0 - pad_x, x1=x1 + pad_x,
             y0=y0 - pad_y, y1=y1 + pad_y,
-            line=dict(color=color, width=2),
+            line=dict(color=color, width=3),
             fillcolor=color,
-            opacity=0.08,
+            opacity=0.14,
             layer="below",
         )
         fig.add_annotation(
@@ -213,15 +225,15 @@ def add_layout_decorations(fig, event_position_df: pd.DataFrame):
             y=y1 + pad_y + 18,
             text=f"<b>{name}</b>",
             showarrow=False,
-            font=dict(size=14, color=color),
+            font=dict(size=15, color=color),
         )
 
-    # ---- Column boxes ----
+    # ---- Device boxes ----
     _box(X_CLIENT_REQ, X_CLIENT_RESP, LAYER_Y["physical"], LAYER_Y["application"],
          "#1f77b4", "CLIENT")
-    _box(X_NODE1_RESP, X_NODE1_REQ, LAYER_Y["physical"], LAYER_Y["network"],
+    _box(X_NODE1_RESP_OUT, X_NODE1_REQ_OUT, LAYER_Y["physical"], LAYER_Y["network"],
          "#ff7f0e", "ROUTER 1")
-    _box(X_NODE2_RESP, X_NODE2_REQ, LAYER_Y["physical"], LAYER_Y["network"],
+    _box(X_NODE2_RESP_OUT, X_NODE2_REQ_OUT, LAYER_Y["physical"], LAYER_Y["network"],
          "#ff7f0e", "ROUTER 2")
     _box(X_SERVER_REQ, X_SERVER_RESP, LAYER_Y["physical"], LAYER_Y["application"],
          "#2ca02c", "SERVER")
@@ -268,15 +280,44 @@ def add_layout_decorations(fig, event_position_df: pd.DataFrame):
             font=dict(size=10, color="#555555"),
         )
 
+    # ---- Static stage labels ----
+    labeled_positions = (
+        event_position_df[event_position_df["label"] != ""]
+        .drop_duplicates(subset=["x", "y", "label"])
+        .sort_values(["x", "y"])
+    )
+    for row in labeled_positions.itertuples(index=False):
+        if row.x <= X_CLIENT_RESP:
+            xshift = 14
+            xanchor = "left"
+        elif row.x >= X_SERVER_REQ:
+            xshift = 14
+            xanchor = "left"
+        else:
+            xshift = 12
+            xanchor = "left"
+
+        fig.add_annotation(
+            x=row.x,
+            y=row.y,
+            text=row.label,
+            showarrow=False,
+            xshift=xshift,
+            xanchor=xanchor,
+            font=dict(size=11, color="#333333"),
+            bgcolor="rgba(255,255,255,0.72)",
+            borderpad=1,
+        )
+
     # ---- Direction arrows between columns (using data coordinates) ----
-    arrow_y_req = LAYER_Y["physical"] - 50
-    arrow_y_resp = LAYER_Y["physical"] - 72
+    arrow_y_req = LAYER_Y["physical"] + 16
+    arrow_y_resp = LAYER_Y["physical"] - 16
 
     # Request arrows (→)
     for x_start, x_end in [
-        (X_CLIENT_REQ + pad_x + 5,  X_NODE1_REQ - pad_x - 5),
-        (X_NODE1_REQ + pad_x + 5,   X_NODE2_REQ - pad_x - 5),
-        (X_NODE2_REQ + pad_x + 5,   X_SERVER_REQ - pad_x - 5),
+        (X_CLIENT_REQ + pad_x + 5,      X_NODE1_REQ_IN - pad_x - 5),
+        (X_NODE1_REQ_OUT + pad_x + 5,   X_NODE2_REQ_IN - pad_x - 5),
+        (X_NODE2_REQ_OUT + pad_x + 5,   X_SERVER_REQ - pad_x - 5),
     ]:
         fig.add_annotation(
             x=x_end, y=arrow_y_req,
@@ -292,9 +333,9 @@ def add_layout_decorations(fig, event_position_df: pd.DataFrame):
 
     # Response arrows (←)
     for x_start, x_end in [
-        (X_SERVER_RESP - pad_x - 5,  X_NODE2_RESP + pad_x + 5),
-        (X_NODE2_RESP - pad_x - 5,   X_NODE1_RESP + pad_x + 5),
-        (X_NODE1_RESP - pad_x - 5,   X_CLIENT_RESP + pad_x + 5),
+        (X_SERVER_RESP - pad_x - 5,      X_NODE2_RESP_IN + pad_x + 5),
+        (X_NODE2_RESP_OUT - pad_x - 5,   X_NODE1_RESP_IN + pad_x + 5),
+        (X_NODE1_RESP_OUT - pad_x - 5,   X_CLIENT_RESP + pad_x + 5),
     ]:
         fig.add_annotation(
             x=x_end, y=arrow_y_resp,
@@ -310,7 +351,7 @@ def add_layout_decorations(fig, event_position_df: pd.DataFrame):
 
     # ---- Legend for arrow colours ----
     legend_x = (X_CLIENT_REQ + X_SERVER_RESP) / 2
-    legend_y = LAYER_Y["physical"] - 95
+    legend_y = LAYER_Y["physical"] - 105
     fig.add_annotation(
         x=legend_x,
         y=legend_y,
