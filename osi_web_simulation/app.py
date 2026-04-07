@@ -35,8 +35,20 @@ st.markdown(
     """
     This simulation models traffic through the seven
     [OSI layers](https://en.wikipedia.org/wiki/OSI_model).
-    The model performs **one DNS lookup at startup** to resolve the server hostname,
-    then sends **HTTP requests continuously** using that resolved IP address.
+    The model performs **one DNS lookup** (`bbc.co.uk/` → `151.101.128.81`),
+    then requests `index.html` from `151.101.128.81:80/`.
+
+    As `index.html` packets arrive at **client application layer**, they trigger
+    additional requests:
+    - packet 2 → `style.css`
+    - packet 3 → `logo.png`
+    - packet 4 → `hero.png`
+
+    The server response is deterministic and packetized at L4 (1 packet = 1KB):
+    - `index.html` = 5 packets
+    - `style.css` = 5 packets
+    - `logo.png` = 10 packets
+    - `hero.png` = 10 packets
 
     - 📧 **DNS query / response** — Client → Router 1 → DNS Server → Router 1 → Client
     - 🌐 **HTTP request / response** — Client → Router 1 → Router 2 → Web Server → Router 2 → Router 1 → Client
@@ -51,16 +63,6 @@ st.markdown(
 with st.sidebar:
     st.header("⚙️ Simulation Parameters")
 
-    sim_duration = st.slider(
-        "Simulation duration (ms)",
-        min_value=50, max_value=600, value=250, step=25,
-        help="Total length of the simulation run.",
-    )
-    inter_arrival_time = st.slider(
-        "Fixed time between HTTP requests (ms)",
-        min_value=5, max_value=60, value=8, step=1,
-        help="Deterministic interval between successive HTTP requests.",
-    )
     client_layer_time = st.slider(
         "Client layer processing time (ms)",
         min_value=1, max_value=10, value=1, step=1,
@@ -105,8 +107,6 @@ with st.sidebar:
 if run_btn:
     with st.spinner("Running SimPy simulation…"):
         event_log = run_simulation(
-            sim_duration=sim_duration,
-            inter_arrival_time=inter_arrival_time,
             client_layer_time=client_layer_time,
             node_layer_time=node_layer_time,
             server_layer_time=server_layer_time,
@@ -130,12 +130,12 @@ if run_btn:
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Total entities generated", num_entities)
-    col2.metric("Simulation duration", f"{sim_duration} ms")
+    col2.metric("Completion time", f"{event_log['time'].max():.0f} ms")
     col3.metric("Events logged", len(event_log))
 
     st.caption(
         f"Deterministic rules: DNS lookups={num_dns} (startup only), "
-        f"HTTP requests={num_http_requests}, interval={inter_arrival_time} ms"
+        f"HTTP requests={num_http_requests}, packets delivered=30 (1KB each)"
     )
 
     event_position_df = get_event_positions()
@@ -293,13 +293,17 @@ if run_btn:
         st.markdown(
             """
             **Generation rules (deterministic):**
-            - Exactly one DNS request/response pair is generated at simulation startup.
-            - HTTP requests are generated at a fixed interval (no random arrivals).
-            - All stage and processing times are fixed integer milliseconds (no jitter).
+            - Exactly one DNS request/response pair is generated.
+                        - `index.html` is requested after DNS resolution.
+                        - `style.css`, `logo.png`, and `hero.png` requests are triggered by
+                            index packets 2, 3, and 4 arriving at client application.
+            - Server L7→L5 runs as a separate response-builder process.
+            - L4 packetization uses 1 packet/tick and 1 packet = 1KB.
+            - Client L4 only releases packets in sequence order.
 
             **Response rules:**
             - Each DNS request has one DNS response.
-            - Each HTTP request has one HTTP response.
+            - HTTP response files are fixed: index(5), css(5), logo(10), hero(10).
             """
         )
 

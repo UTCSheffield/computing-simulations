@@ -29,13 +29,22 @@ from vidigi.logging import EventLogger
 DNS_QUERY_DOMAIN = "bbc.co.uk/"
 DNS_RESOLVED_IP = "151.101.128.81"
 
-INDEX_HTML_FRAGMENTS = [
-    "<html><head>",
-    '<link rel="stylesheet" href="style.css">',
-    "</head><body><h1>Heading</h1>",
-    '<img src="logo.png">',
-    '<img src="hero.png"></body></html>',
+# 1 packet = 1KB. Deterministic server response set.
+RESPONSE_FILES_KB = [
+    ("index.html", 5),
+    ("style.css", 5),
+    ("logo.png", 10),
+    ("hero.png", 10),
 ]
+TOTAL_RESPONSE_PACKETS = sum(size_kb for _, size_kb in RESPONSE_FILES_KB)
+FILE_SIZE_KB = dict(RESPONSE_FILES_KB)
+INDEX_PACKET_TRIGGERS = {
+    2: "style.css",
+    3: "logo.png",
+    4: "hero.png",
+}
+
+
 
 # ---------------------------------------------------------------------------
 # Stage name lists — each string is a unique event name logged for vidigi
@@ -185,25 +194,91 @@ def _dns_entity_process(env, entity_id, logger, params, done_event):
     done_event.succeed()
 
 
-def _http_entity_process(env, entity_id, logger, params, done_event):
-    """SimPy process for an HTTP request entity (🌐). Starts only after DNS resolves."""
-    resolved_ip = params["env_state"]["dns_map"].get(DNS_QUERY_DOMAIN)
-    if resolved_ip is None:
-        resolved_ip = DNS_RESOLVED_IP
+def _server_l7_to_l5_response_builder(
+    env,
+    entity_id,
+    logger,
+    params,
+    request_url,
+    file_name,
+    file_size_kb,
+    packet_store,
+    done_event,
+):
+    """Server L7→L5 process: serves files one at a time and queues packet metadata."""
+    layer_time = params["server_layer_time"]
+    logger.log_queue(
+        entity_id=entity_id,
+        event="server_resp_application",
+        time=env.now,
+        state_label=f"App server serving: {file_name}",
+        request_url=request_url,
+    )
+    yield env.timeout(max(1, layer_time))
 
-    request_url = f"{resolved_ip}:80/"
+    logger.log_queue(
+        entity_id=entity_id,
+        event="server_resp_presentation",
+        time=env.now,
+        state_label=f"Prepare {file_name} payload",
+        request_url=request_url,
+    )
+    yield env.timeout(max(1, layer_time))
 
-    def _do_stage(stage, base_time, state_label):
+    logger.log_queue(
+        entity_id=entity_id,
+        event="server_resp_session",
+        time=env.now,
+        state_label=f"Open stream for {file_name}",
+        request_url=request_url,
+    )
+    yield env.timeout(max(1, layer_time))
+
+    for file_packet in range(1, file_size_kb + 1):
+        yield packet_store.put(
+            {
+                "seq": file_packet,
+                "file": file_name,
+                "file_packet": file_packet,
+                "file_total": file_size_kb,
+                "size_kb": 1,
+            }
+        )
+
+    done_event.succeed()
+
+
+def _http_file_request_process(
+    env,
+    entity_id,
+    logger,
+    params,
+    resolved_ip,
+    file_name,
+    done_event,
+    index_packet_callback=None,
+):
+    """Process one HTTP file request from send to final packet at client application."""
+    if file_name == "index.html":
+        request_path = "/"
+    else:
+        request_path = f"/{file_name}"
+    request_url = f"{resolved_ip}:80{request_path}"
+    file_size_kb = FILE_SIZE_KB[file_name]
+
+    def _do_stage(stage, base_time, state_label, **extra_fields):
         logger.log_queue(
             entity_id=entity_id,
             event=stage,
             time=env.now,
             state_label=state_label,
             request_url=request_url,
+            **extra_fields,
         )
         return env.timeout(max(1, base_time))
 
-    # Limit concurrent HTTP work to the configured connection pool size.
+    # One slot represents one active HTTP request lifecycle, from request send
+    # until the final response packet is delivered to client application.
     with params["http_connections"].request() as conn_req:
         yield conn_req
 
@@ -224,93 +299,140 @@ def _http_entity_process(env, entity_id, logger, params, done_event):
             yield _do_stage(stage, params["node_layer_time"], f"GET {request_url}")
 
         for stage in SERVER_REQUEST_STAGES:
-            yield _do_stage(stage, params["server_layer_time"], f"Server received GET {request_url}")
+            if stage == "server_application":
+                yield _do_stage(
+                    stage,
+                    params["server_layer_time"],
+                    f"App server serving: {file_name}",
+                )
+            else:
+                yield _do_stage(stage, params["server_layer_time"], f"GET {request_url}")
 
-        # Server app decides the root response file.
-        for fragment in INDEX_HTML_FRAGMENTS:
-            params["env_state"]["response_fragments"].append(fragment)
-
-        # Web server processes the request
+        # Server processing before response-building starts.
         yield env.timeout(max(1, params["server_processing_time"]))
 
-        # At transport, the server splits index.html into deterministic packets.
-        total = len(INDEX_HTML_FRAGMENTS)
-        for i, fragment in enumerate(INDEX_HTML_FRAGMENTS, start=1):
+        packet_store = simpy.Store(env)
+        build_done = env.event()
+        env.process(
+            _server_l7_to_l5_response_builder(
+                env,
+                entity_id,
+                logger,
+                params,
+                request_url,
+                file_name,
+                file_size_kb,
+                packet_store,
+                build_done,
+            )
+        )
+        yield build_done
+
+        # L4 packetization: exactly 1 packet per tick, then forward packet down stack.
+        for _ in range(file_size_kb):
+            packet = yield packet_store.get()
+            packet_text = (
+                f"pkt {packet['seq']} "
+                f"{packet['file']} {packet['file_packet']}/{packet['file_total']} (1KB)"
+            )
+
             yield _do_stage(
                 "server_resp_transport",
-                params["server_layer_time"],
-                f"Packet {i}/{total}: {fragment}",
+                1,
+                f"TX {packet_text}",
+                packet_seq=packet["seq"],
+                packet_file=packet["file"],
+                packet_file_seq=packet["file_packet"],
+                packet_file_total=packet["file_total"],
+                packet_size_kb=packet["size_kb"],
             )
 
-        for stage in SERVER_RESPONSE_STAGES:
-            if stage == "server_resp_transport":
-                continue
-            yield _do_stage(stage, params["server_layer_time"], "index.html response")
+            # Server L3→L1 for this packet.
+            for stage in ["server_resp_network", "server_resp_data_link", "server_resp_physical"]:
+                yield _do_stage(stage, params["server_layer_time"], f"TX {packet_text}")
 
-        for stage in NODE2_RESPONSE_STAGES:
-            yield _do_stage(stage, params["node_layer_time"], "index.html response")
+            # Routers forward packet.
+            for stage in NODE2_RESPONSE_STAGES:
+                yield _do_stage(stage, params["node_layer_time"], f"Forward {packet_text}")
 
-        for stage in NODE1_RESPONSE_STAGES:
-            yield _do_stage(stage, params["node_layer_time"], "index.html response")
+            for stage in NODE1_RESPONSE_STAGES:
+                yield _do_stage(stage, params["node_layer_time"], f"Forward {packet_text}")
 
-        # Transport only releases fragments to app in order.
-        for i, fragment in enumerate(INDEX_HTML_FRAGMENTS, start=1):
-            yield _do_stage(
-                "client_resp_transport",
-                params["client_layer_time"],
-                f"Reassemble {i}/{total}: {fragment}",
-            )
-            yield _do_stage(
-                "client_resp_application",
-                params["client_layer_time"],
-                f"Render {i}/{total}: {fragment}",
-            )
+            # Client receives L1→L3 then L4 releases in-sequence.
+            for stage in ["client_resp_physical", "client_resp_data_link", "client_resp_network"]:
+                yield _do_stage(stage, params["client_layer_time"], f"RX {packet_text}")
 
-        for stage in CLIENT_RESPONSE_STAGES:
-            if stage in ("client_resp_transport", "client_resp_application"):
-                continue
-            yield _do_stage(stage, params["client_layer_time"], "index.html response")
+            yield _do_stage("client_resp_transport", params["client_layer_time"], f"In-order deliver {packet_text}")
+            yield _do_stage("client_resp_session", params["client_layer_time"], f"Pass up {packet_text}")
+            yield _do_stage("client_resp_presentation", params["client_layer_time"], f"Pass up {packet_text}")
+            yield _do_stage("client_resp_application", params["client_layer_time"], f"App recv {packet_text}")
+
+            if file_name == "index.html" and index_packet_callback is not None:
+                index_packet_callback(packet["seq"])
 
         logger.log_departure(
             entity_id=entity_id,
             time=env.now,
-            state_label=f"Completed GET {request_url}; rendered index.html",
+            state_label=f"Completed GET {request_url}; delivered {file_size_kb} packets",
             request_url=request_url,
         )
     done_event.succeed()
 
 
-def _initial_dns_then_http_generator(env, logger, params):
-    """Run one DNS lookup first, then generate HTTP requests indefinitely.
-
-    DNS is a single startup operation (entity_id=1), and all HTTP requests
-    use even IDs only so icon assignment stays HTTP=🌐 with icon cycling.
-    """
+def _single_dns_then_http_flow(env, logger, params):
+    """Run exactly one DNS then one HTTP process end-to-end."""
     dns_id = 1
     dns_done = env.event()
     env.process(_dns_entity_process(env, dns_id, logger, params, dns_done))
     yield dns_done
 
-    http_id = 2
+    resolved_ip = params["env_state"]["dns_map"].get(DNS_QUERY_DOMAIN, DNS_RESOLVED_IP)
 
-    def _start_http_request():
-        nonlocal http_id
-        done = env.event()
-        env.process(_http_entity_process(env, http_id, logger, params, done))
-        http_id += 2
+    spawned_done_events = []
 
-    # First HTTP request starts immediately once DNS is resolved.
-    _start_http_request()
+    def _spawn_request(file_name):
+        if file_name in params["env_state"]["requested_files"]:
+            return
+        params["env_state"]["requested_files"].add(file_name)
+        entity_id = params["env_state"]["next_entity_id"]
+        params["env_state"]["next_entity_id"] += 2
+        ev = env.event()
+        spawned_done_events.append(ev)
+        env.process(
+            _http_file_request_process(
+                env,
+                entity_id,
+                logger,
+                params,
+                resolved_ip,
+                file_name,
+                ev,
+            )
+        )
 
-    while True:
-        inter = max(1, params["inter_arrival_time"])
-        yield env.timeout(inter)
-        _start_http_request()
+    def _on_index_packet_at_client(packet_no):
+        file_to_request = INDEX_PACKET_TRIGGERS.get(packet_no)
+        if file_to_request is not None:
+            _spawn_request(file_to_request)
 
+    http_done = env.event()
+    params["env_state"]["requested_files"].add("index.html")
+    env.process(
+        _http_file_request_process(
+            env,
+            2,
+            logger,
+            params,
+            resolved_ip,
+            "index.html",
+            http_done,
+            index_packet_callback=_on_index_packet_at_client,
+        )
+    )
+    yield http_done
 
-def _session_generator(env, logger, params):
-    """Backward-compatible wrapper name used by run_simulation."""
-    yield from _initial_dns_then_http_generator(env, logger, params)
+    if spawned_done_events:
+        yield env.all_of(spawned_done_events)
 
 
 def run_simulation(
@@ -329,7 +451,7 @@ def run_simulation(
     sim_duration : int
         Total simulation time in milliseconds.
     inter_arrival_time : int
-        Mean gap between successive web-request arrivals (milliseconds).
+        Retained for backward compatibility. Ignored in single-flow mode.
     client_layer_time : int
         Mean time a packet spends at each client-side OSI layer (milliseconds).
     node_layer_time : int
@@ -340,7 +462,8 @@ def run_simulation(
         Mean time the server spends generating a response (milliseconds).
     Notes
     -----
-    HTTP flows are limited by an internal connection pool with capacity 2.
+    Runs one deterministic DNS + HTTP flow and stops when it completes.
+    HTTP flows use an internal connection pool with capacity 2.
     Returns
     -------
     pandas.DataFrame
@@ -370,11 +493,13 @@ def run_simulation(
         "http_connections": http_connections,
         "env_state": {
             "dns_map": {},
-            "response_fragments": [],
+            "requested_files": set(),
+            "next_entity_id": 4,
         },
     }
 
-    env.process(_session_generator(env, logger, params))
-    env.run(until=sim_duration)
+    # Run to natural completion of the single deterministic flow.
+    env.process(_single_dns_then_http_flow(env, logger, params))
+    env.run()
 
     return logger.to_dataframe()
