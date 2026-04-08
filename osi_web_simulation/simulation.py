@@ -173,7 +173,7 @@ def _server_l7_to_l5_response_builder(
         entity_id=entity_id,
         event="server_resp_application",
         time=env.now,
-        state_label=f"App server serving: {file_name}",
+        state_label=f"Serving: {file_name}",
         request_url=request_url,
     )
     yield env.timeout(max(1, layer_time))
@@ -182,7 +182,7 @@ def _server_l7_to_l5_response_builder(
         entity_id=entity_id,
         event="server_resp_presentation",
         time=env.now,
-        state_label=f"Prepare {file_name} payload",
+        state_label=f"Prepare {file_name}",
         request_url=request_url,
     )
     yield env.timeout(max(1, layer_time))
@@ -191,7 +191,7 @@ def _server_l7_to_l5_response_builder(
         entity_id=entity_id,
         event="server_resp_session",
         time=env.now,
-        state_label=f"Open stream for {file_name}",
+        state_label=f"Open stream {file_name}",
         request_url=request_url,
     )
     yield env.timeout(max(1, layer_time))
@@ -275,10 +275,10 @@ def _http_file_request_process(
             for stage in ["client_resp_physical", "client_resp_data_link", "client_resp_network"]:
                 yield _pkt_stage(stage, params["client_layer_time"], f"RX {packet_text}")
 
-            yield _pkt_stage("client_resp_transport", params["client_layer_time"], f"In-order deliver {packet_text}")
-            yield _pkt_stage("client_resp_session", params["client_layer_time"], f"Pass up {packet_text}")
-            yield _pkt_stage("client_resp_presentation", params["client_layer_time"], f"Pass up {packet_text}")
-            yield _pkt_stage("client_resp_application", params["client_layer_time"], f"App recv {packet_text}")
+            yield _pkt_stage("client_resp_transport", params["client_layer_time"], f"Ordered {packet_text}")
+            yield _pkt_stage("client_resp_session", params["client_layer_time"], f"Up {packet_text}")
+            yield _pkt_stage("client_resp_presentation", params["client_layer_time"], f"Up {packet_text}")
+            yield _pkt_stage("client_resp_application", params["client_layer_time"], f"Recv {packet_text}")
 
             # Track file completion at client application
             if file_name not in params["env_state"]["files_packets_received"]:
@@ -394,8 +394,8 @@ def _http_file_request_process(
         for _ in range(file_size_kb):
             packet = yield packet_store.get()
             packet_text = (
-                f"pkt {packet['seq']} "
-                f"{packet['file']} {packet['file_packet']}/{packet['file_total']} (1KB)"
+                # f"pkt {packet['seq']} "
+                f"{packet['file']} {packet['file_packet']}/{packet['file_total']}"# (1KB)"
             )
 
             yield _do_stage(
